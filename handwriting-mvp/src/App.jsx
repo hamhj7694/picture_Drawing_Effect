@@ -1,341 +1,248 @@
-import React, { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import "./App.css";
 
-const MOODS = [
-  {
-    id: "daily",
-    label: "일상 스냅",
-    samples: ["오늘 기분 좋다", "이 순간 저장", "괜히 설레는 날", "햇살까지 완벽"],
-  },
-  {
-    id: "travel",
-    label: "여행/풍경",
-    samples: ["오늘은 여기", "그냥 걷는 중", "바람이 좋은 날", "여기 분위기 최고"],
-  },
-  {
-    id: "cafe",
-    label: "카페",
-    samples: ["오늘의 커피", "조용한 시간", "잠깐 쉬어가기", "달달한 오후"],
-  },
-  {
-    id: "food",
-    label: "음식",
-    samples: ["오늘 메뉴 성공", "한입에 행복", "이건 또 먹어야지"],
-  },
-  {
-    id: "pet",
-    label: "반려동물",
-    samples: ["오늘도 귀엽다", "이 표정 뭐야", "작은 행복 발견", "지금 제일 행복해"],
-  },
-  {
-    id: "relationship",
-    label: "커플/친구",
-    samples: ["같이 있어서 좋다", "오늘도 우리", "이 순간 저장", "추억 하나 추가"],
-  },
+const DEFAULT_TEXTS = [
+  { content: "오늘의 순간", x: 22, y: 16, rotate: -5 },
+  { content: "이 분위기 저장", x: 72, y: 24, rotate: 4 },
+  { content: "괜히 기분 좋은 날", x: 24, y: 76, rotate: 3 },
 ];
 
-const DOODLES = ["♡", "✦", "✧", "→", "~", "⋯"];
+function createTextLayers() {
+  const timestamp = Date.now();
 
-function createTemplate(moodId) {
-  const mood = MOODS.find((item) => item.id === moodId) || MOODS[0];
-
-  const textPositions = [
-    { x: 12, y: 14 },
-    { x: 58, y: 20 },
-    { x: 10, y: 62 },
-    { x: 54, y: 76 },
-  ];
-
-  const doodlePositions = [
-    { x: 28, y: 30 },
-    { x: 78, y: 40 },
-    { x: 18, y: 82 },
-    { x: 72, y: 58 },
-  ];
-
-  const textCount = mood.id === "food" ? 3 : 4;
-
-  const doodleLayers = DOODLES.slice(0, 4).map((content, index) => ({
-    id: `doodle_${Date.now()}_${index}`,
-    type: "doodle",
-    content,
-    x: doodlePositions[index].x,
-    y: doodlePositions[index].y,
-    fontSize: 30,
+  return DEFAULT_TEXTS.map((item, index) => ({
+    id: `text_${timestamp}_${index}`,
+    content: item.content,
+    x: item.x,
+    y: item.y,
+    rotate: item.rotate,
+    fontSize: 22,
     visible: true,
-    locked: false,
-    group: index < 2 ? "top" : "middle",
   }));
-
-  const textLayers = mood.samples.slice(0, textCount).map((content, index) => ({
-    id: `text_${Date.now()}_${index}`,
-    type: "text",
-    content,
-    x: textPositions[index].x,
-    y: textPositions[index].y,
-    fontSize: 24,
-    visible: true,
-    locked: false,
-    group: "top",
-  }));
-
-  return [...doodleLayers, ...textLayers];
 }
 
 export default function App() {
   const [imageUrl, setImageUrl] = useState(null);
-  const [mood, setMood] = useState("daily");
-  const [layers, setLayers] = useState([]);
-  const [selectedId, setSelectedId] = useState(null);
-  const [draggingId, setDraggingId] = useState(null);
+  const [imageRatio, setImageRatio] = useState("1 / 1");
+  const [textLayers, setTextLayers] = useState([]);
+  const [selectedTextId, setSelectedTextId] = useState(null);
+  const [draggingTextId, setDraggingTextId] = useState(null);
+  const [effects, setEffects] = useState({ drawing: true, minimi: false });
+
   const canvasRef = useRef(null);
   const imgRef = useRef(null);
 
-  const selectedLayer = useMemo(() => {
-    return layers.find((layer) => layer.id === selectedId);
-  }, [layers, selectedId]);
+  const selectedText = useMemo(() => {
+    return textLayers.find((t) => t.id === selectedTextId);
+  }, [textLayers, selectedTextId]);
 
-  function handleImageUpload(event) {
-    const file = event.target.files?.[0];
+  function handleUpload(e) {
+    const file = e.target.files?.[0];
     if (!file) return;
 
     const url = URL.createObjectURL(file);
+    const img = new Image();
+
+    img.onload = () => {
+      setImageRatio(`${img.naturalWidth} / ${img.naturalHeight}`);
+    };
+
+    img.src = url;
     setImageUrl(url);
-    setLayers([]);
-    setSelectedId(null);
+    setTextLayers(createTextLayers());
   }
 
-  function applyMood(moodId) {
-    setMood(moodId);
-    setLayers(createTemplate(moodId));
-    setSelectedId(null);
+  function updateText(id, patch) {
+    setTextLayers((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, ...patch } : t))
+    );
   }
 
-  function updateLayer(id, patch) {
-    setLayers((prev) => prev.map((layer) => (layer.id === id ? { ...layer, ...patch } : layer)));
+  function handlePointerDown(e, text) {
+    e.stopPropagation();
+    setSelectedTextId(text.id);
+    setDraggingTextId(text.id);
   }
 
-  function deleteLayer(id) {
-    setLayers((prev) => prev.filter((layer) => layer.id !== id));
-    if (selectedId === id) setSelectedId(null);
-  }
-
-  function moveLayerOrder(fromIndex, toIndex) {
-    if (toIndex < 0 || toIndex >= layers.length) return;
-
-    setLayers((prev) => {
-      const next = [...prev];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      return next;
-    });
-  }
-
-  function handlePointerDown(event, layer) {
-    event.stopPropagation();
-    if (layer.locked) return;
-
-    setSelectedId(layer.id);
-    setDraggingId(layer.id);
-  }
-
-  function handlePointerMove(event) {
-    if (!draggingId || !canvasRef.current) return;
+  function handlePointerMove(e) {
+    if (!draggingTextId || !canvasRef.current) return;
 
     const rect = canvasRef.current.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width) * 100;
-    const y = ((event.clientY - rect.top) / rect.height) * 100;
 
-    updateLayer(draggingId, {
-      x: Math.max(0, Math.min(95, x)),
-      y: Math.max(0, Math.min(95, y)),
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+
+    updateText(draggingTextId, {
+      x: Math.max(2, Math.min(98, x)),
+      y: Math.max(2, Math.min(98, y)),
     });
   }
 
   function handlePointerUp() {
-    setDraggingId(null);
+    setDraggingTextId(null);
   }
 
-  async function downloadImage() {
-    if (!imgRef.current || !imageUrl) return;
+  function addText() {
+    const newText = {
+      id: `text_${Date.now()}`,
+      content: "새 문구",
+      x: 50,
+      y: 50,
+      rotate: 0,
+      fontSize: 22,
+      visible: true,
+    };
 
-    const img = imgRef.current;
+    setTextLayers((prev) => [...prev, newText]);
+    setSelectedTextId(newText.id);
+  }
+
+  function deleteText() {
+    setTextLayers((prev) => prev.filter((t) => t.id !== selectedTextId));
+    setSelectedTextId(null);
+  }
+
+  function toggleEffect(key) {
+    setEffects((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  function download() {
+    if (!imgRef.current) return;
+
     const canvas = document.createElement("canvas");
-    const width = img.naturalWidth || 1080;
-    const height = img.naturalHeight || 1350;
-    canvas.width = width;
-    canvas.height = height;
+    const img = imgRef.current;
+
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
 
     const ctx = canvas.getContext("2d");
-    ctx.drawImage(img, 0, 0, width, height);
+    ctx.drawImage(img, 0, 0);
 
-    layers.forEach((layer) => {
-      if (!layer.visible) return;
+    textLayers.forEach((t) => {
+      const x = (t.x / 100) * canvas.width;
+      const y = (t.y / 100) * canvas.height;
 
       ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate((t.rotate * Math.PI) / 180);
+
+      ctx.font = `${t.fontSize * 2}px sans-serif`;
       ctx.fillStyle = "white";
-      ctx.strokeStyle = "rgba(0, 0, 0, 0.35)";
-      ctx.lineWidth = 4;
-      ctx.font = `${layer.fontSize * (width / 420)}px "Comic Sans MS", "Malgun Gothic", sans-serif`;
+      ctx.strokeStyle = "black";
 
-      const x = (layer.x / 100) * width;
-      const y = (layer.y / 100) * height;
+      ctx.strokeText(t.content, 0, 0);
+      ctx.fillText(t.content, 0, 0);
 
-      ctx.strokeText(layer.content, x, y);
-      ctx.fillText(layer.content, x, y);
       ctx.restore();
     });
 
     const link = document.createElement("a");
-    link.download = "handwriting-result.png";
-    link.href = canvas.toDataURL("image/png");
+    link.download = "result.png";
+    link.href = canvas.toDataURL();
     link.click();
   }
 
   return (
     <div className="app">
-      <main className="layout">
-        <section className="workspace-card">
-          <header className="top-bar">
+      <div className="layout">
+        <div className="workspace-card">
+          <div className="top-bar">
             <div>
-              <h1>손글씨 이미지 꾸미기 MVP</h1>
-              <p>사진 업로드 → 무드 선택 → 텍스트 수정/이동 → 저장</p>
+              <h1>손글씨 드로잉, 미니미 효과 꾸미기 웹</h1>
+              <p>사진 업로드 → 효과 선택 → 만들기 → 저장</p>
             </div>
 
             <div className="actions">
               <label className="upload-button">
                 사진 업로드
-                <input type="file" accept="image/*" onChange={handleImageUpload} />
+                <input type="file" onChange={handleUpload} />
               </label>
-              <button className="primary-button" onClick={downloadImage} disabled={!imageUrl}>
-                저장
-              </button>
+              <button onClick={download}>저장</button>
             </div>
-          </header>
+          </div>
 
           <div
             ref={canvasRef}
             className="photo-canvas"
+            style={{ aspectRatio: imageRatio }}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
-            onPointerLeave={handlePointerUp}
-            onClick={() => setSelectedId(null)}
           >
             {imageUrl ? (
-              <img ref={imgRef} src={imageUrl} alt="업로드 이미지" className="base-image" />
+              <img ref={imgRef} src={imageUrl} className="base-image" />
             ) : (
-              <div className="empty-state">사진을 업로드하세요</div>
+              <div className="empty-state">이미지 업로드</div>
             )}
 
-            {layers.map((layer, index) => {
-              if (!layer.visible) return null;
-
-              return (
-                <div
-                  key={layer.id}
-                  className={`layer-item ${selectedId === layer.id ? "selected" : ""} ${layer.locked ? "locked" : ""}`}
-                  onPointerDown={(event) => handlePointerDown(event, layer)}
-                  style={{
-                    left: `${layer.x}%`,
-                    top: `${layer.y}%`,
-                    fontSize: `${layer.fontSize}px`,
-                    zIndex: index + 1,
-                  }}
-                >
-                  {layer.content}
-                </div>
-              );
-            })}
+            {textLayers.map((t) => (
+              <div
+                key={t.id}
+                className={`layer-item ${
+                  selectedTextId === t.id ? "selected" : ""
+                }`}
+                style={{
+                  left: `${t.x}%`,
+                  top: `${t.y}%`,
+                  fontSize: t.fontSize,
+                  transform: `translate(-50%,-50%) rotate(${t.rotate}deg)`,
+                }}
+                onPointerDown={(e) => handlePointerDown(e, t)}
+              >
+                {t.content}
+              </div>
+            ))}
           </div>
-        </section>
+        </div>
 
-        <aside className="side-panel">
-          <section className="panel-card">
-            <h2>무드 선택</h2>
+        <div className="side-panel">
+          <div className="panel-card">
+            <h3>효과 선택</h3>
+
             <div className="mood-grid">
-              {MOODS.map((item) => (
-                <button
-                  key={item.id}
-                  className={`mood-button ${mood === item.id ? "active" : ""}`}
-                  onClick={() => applyMood(item.id)}
-                  disabled={!imageUrl}
-                >
-                  {item.label}
-                </button>
-              ))}
+              <button
+                className={`mood-button ${effects.drawing ? "active" : ""}`}
+                onClick={() => toggleEffect("drawing")}
+              >
+                드로잉
+              </button>
+
+              <button
+                className={`mood-button ${effects.minimi ? "active" : ""}`}
+                onClick={() => toggleEffect("minimi")}
+              >
+                미니미
+              </button>
             </div>
-          </section>
 
-          <section className="panel-card">
-            <h2>선택 레이어</h2>
-            {selectedLayer ? (
+            <button style={{ marginTop: 10 }}>만들기</button>
+          </div>
+
+          <div className="panel-card">
+            <h3>텍스트 편집</h3>
+
+            {selectedText ? (
               <div className="edit-box">
-                <label>내용</label>
                 <textarea
-                  value={selectedLayer.content}
-                  onChange={(event) => updateLayer(selectedLayer.id, { content: event.target.value })}
+                  value={selectedText.content}
+                  onChange={(e) =>
+                    updateText(selectedText.id, {
+                      content: e.target.value,
+                    })
+                  }
                 />
 
-                <label>크기</label>
-                <input
-                  type="range"
-                  min="14"
-                  max="52"
-                  value={selectedLayer.fontSize}
-                  onChange={(event) => updateLayer(selectedLayer.id, { fontSize: Number(event.target.value) })}
-                />
-
-                <div className="row-buttons">
-                  <button onClick={() => updateLayer(selectedLayer.id, { locked: !selectedLayer.locked })}>
-                    {selectedLayer.locked ? "잠금 해제" : "잠금"}
-                  </button>
-                  <button onClick={() => updateLayer(selectedLayer.id, { visible: !selectedLayer.visible })}>
-                    {selectedLayer.visible ? "숨김" : "보임"}
-                  </button>
-                </div>
-
-                <button className="danger-button" onClick={() => deleteLayer(selectedLayer.id)}>
+                <button onClick={deleteText} className="danger-button">
                   삭제
                 </button>
               </div>
             ) : (
-              <p className="muted">캔버스 위 레이어를 선택하세요.</p>
+              <p>텍스트 선택하세요</p>
             )}
-          </section>
 
-          <section className="panel-card">
-            <h2>레이어 순서</h2>
-            <p className="muted">위에 있을수록 앞쪽입니다. 0층 원본 사진은 고정입니다.</p>
-
-            <div className="layer-list">
-              {[...layers].reverse().map((layer, reverseIndex) => {
-                const actualIndex = layers.length - 1 - reverseIndex;
-                const floor = actualIndex + 1;
-
-                return (
-                  <div
-                    key={layer.id}
-                    className={`layer-row ${selectedId === layer.id ? "active" : ""}`}
-                    onClick={() => setSelectedId(layer.id)}
-                  >
-                    <div className="layer-name">
-                      <strong>{floor}층</strong>
-                      <span>{layer.type === "text" ? "텍스트" : "드로잉"}: {layer.content}</span>
-                    </div>
-
-                    <div className="order-buttons">
-                      <button onClick={(event) => { event.stopPropagation(); moveLayerOrder(actualIndex, actualIndex + 1); }} disabled={actualIndex >= layers.length - 1}>▲</button>
-                      <button onClick={(event) => { event.stopPropagation(); moveLayerOrder(actualIndex, actualIndex - 1); }} disabled={actualIndex <= 0}>▼</button>
-                    </div>
-                  </div>
-                );
-              })}
-
-              <div className="base-floor">0층 원본 사진 고정</div>
-            </div>
-          </section>
-        </aside>
-      </main>
+            <button onClick={addText}>텍스트 추가</button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
