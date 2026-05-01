@@ -27,7 +27,8 @@ export default function App() {
   const [textLayers, setTextLayers] = useState([]);
   const [selectedTextId, setSelectedTextId] = useState(null);
   const [draggingTextId, setDraggingTextId] = useState(null);
-  const [effects, setEffects] = useState({ drawing: true, minimi: false });
+  const [effects, setEffects] = useState({ drawing: false, minimi: false });
+  const [makeStatus, setMakeStatus] = useState("");
 
   const canvasRef = useRef(null);
   const imgRef = useRef(null);
@@ -40,6 +41,10 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (imageUrl) {
+      URL.revokeObjectURL(imageUrl);
+    }
+
     const url = URL.createObjectURL(file);
     const img = new Image();
 
@@ -48,8 +53,11 @@ export default function App() {
     };
 
     img.src = url;
+
     setImageUrl(url);
-    setTextLayers(createTextLayers());
+    setTextLayers([]); // ❗ 텍스트 제거
+    setSelectedTextId(null);
+    setMakeStatus(""); // 상태 초기화
   }
 
   function updateText(id, patch) {
@@ -68,7 +76,6 @@ export default function App() {
     if (!draggingTextId || !canvasRef.current) return;
 
     const rect = canvasRef.current.getBoundingClientRect();
-
     const x = ((e.clientX - rect.left) / rect.width) * 100;
     const y = ((e.clientY - rect.top) / rect.height) * 100;
 
@@ -98,12 +105,23 @@ export default function App() {
   }
 
   function deleteText() {
+    if (!selectedTextId) return;
+
     setTextLayers((prev) => prev.filter((t) => t.id !== selectedTextId));
     setSelectedTextId(null);
   }
 
   function toggleEffect(key) {
     setEffects((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  function handleMake() {
+    if (!imageUrl) return;
+    if (!effects.drawing && !effects.minimi) return;
+
+    setTextLayers(createTextLayers()); // ❗ 여기서 생성
+    setSelectedTextId(null);
+    setMakeStatus("만들기 완료! (※다시 누르면, 기존 작업이 초기화 됩니다!)");
   }
 
   function download() {
@@ -116,29 +134,31 @@ export default function App() {
     canvas.height = img.naturalHeight;
 
     const ctx = canvas.getContext("2d");
-    ctx.drawImage(img, 0, 0);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
     textLayers.forEach((t) => {
+      if (!t.visible) return;
+
       const x = (t.x / 100) * canvas.width;
       const y = (t.y / 100) * canvas.height;
 
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate((t.rotate * Math.PI) / 180);
-
-      ctx.font = `${t.fontSize * 2}px sans-serif`;
+      ctx.font = `${t.fontSize * 2}px "Malgun Gothic", sans-serif`;
       ctx.fillStyle = "white";
-      ctx.strokeStyle = "black";
-
+      ctx.strokeStyle = "rgba(0,0,0,0.45)";
+      ctx.lineWidth = 4;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
       ctx.strokeText(t.content, 0, 0);
       ctx.fillText(t.content, 0, 0);
-
       ctx.restore();
     });
 
     const link = document.createElement("a");
     link.download = "result.png";
-    link.href = canvas.toDataURL();
+    link.href = canvas.toDataURL("image/png");
     link.click();
   }
 
@@ -155,9 +175,11 @@ export default function App() {
             <div className="actions">
               <label className="upload-button">
                 사진 업로드
-                <input type="file" onChange={handleUpload} />
+                <input type="file" accept="image/*" onChange={handleUpload} />
               </label>
-              <button onClick={download}>저장</button>
+              <button onClick={download} disabled={!imageUrl}>
+                저장
+              </button>
             </div>
           </div>
 
@@ -167,9 +189,16 @@ export default function App() {
             style={{ aspectRatio: imageRatio }}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerUp}
+            onClick={() => setSelectedTextId(null)}
           >
             {imageUrl ? (
-              <img ref={imgRef} src={imageUrl} className="base-image" />
+              <img
+                ref={imgRef}
+                src={imageUrl}
+                className="base-image"
+                alt="업로드 이미지"
+              />
             ) : (
               <div className="empty-state">이미지 업로드</div>
             )}
@@ -183,10 +212,14 @@ export default function App() {
                 style={{
                   left: `${t.x}%`,
                   top: `${t.y}%`,
-                  fontSize: t.fontSize,
-                  transform: `translate(-50%,-50%) rotate(${t.rotate}deg)`,
+                  fontSize: `${t.fontSize}px`,
+                  transform: `translate(-50%, -50%) rotate(${t.rotate}deg)`,
                 }}
                 onPointerDown={(e) => handlePointerDown(e, t)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedTextId(t.id);
+                }}
               >
                 {t.content}
               </div>
@@ -198,27 +231,49 @@ export default function App() {
           <div className="panel-card">
             <h3>효과 선택</h3>
 
+            <p style={{ fontSize: 13, color: "#777", marginBottom: 10 }}>
+              드로잉/미니미 중 1개 이상(2개 가능) 선택하고 '만들기'를 클릭하세요!
+            </p>
+
             <div className="mood-grid">
               <button
-                className={`mood-button ${effects.drawing ? "active" : ""}`}
+                className={`mood-button ${
+                  effects.drawing ? "active" : ""
+                }`}
                 onClick={() => toggleEffect("drawing")}
               >
+                <input type="checkbox" checked={effects.drawing} readOnly />
                 드로잉
               </button>
 
               <button
-                className={`mood-button ${effects.minimi ? "active" : ""}`}
+                className={`mood-button ${
+                  effects.minimi ? "active" : ""
+                }`}
                 onClick={() => toggleEffect("minimi")}
               >
+                <input type="checkbox" checked={effects.minimi} readOnly />
                 미니미
               </button>
             </div>
 
-            <button style={{ marginTop: 10 }}>만들기</button>
+            <button
+              onClick={handleMake}
+              disabled={
+                !imageUrl || (!effects.drawing && !effects.minimi)
+              }
+            >
+              만들기
+            </button>
+
+            {makeStatus && (
+              <p className="make-status">{makeStatus}</p>
+            )}
           </div>
 
           <div className="panel-card">
             <h3>텍스트 편집</h3>
+            <p>텍스트를 수정할 수 있어요!</p>
 
             {selectedText ? (
               <div className="edit-box">
@@ -231,6 +286,32 @@ export default function App() {
                   }
                 />
 
+                <label>크기</label>
+                <input
+                  type="range"
+                  min="14"
+                  max="64"
+                  value={selectedText.fontSize}
+                  onChange={(e) =>
+                    updateText(selectedText.id, {
+                      fontSize: Number(e.target.value),
+                    })
+                  }
+                />
+
+                <label>기울기</label>
+                <input
+                  type="range"
+                  min="-20"
+                  max="20"
+                  value={selectedText.rotate}
+                  onChange={(e) =>
+                    updateText(selectedText.id, {
+                      rotate: Number(e.target.value),
+                    })
+                  }
+                />
+
                 <button onClick={deleteText} className="danger-button">
                   삭제
                 </button>
@@ -239,7 +320,9 @@ export default function App() {
               <p>텍스트 선택하세요</p>
             )}
 
-            <button onClick={addText}>텍스트 추가</button>
+            <button onClick={addText} disabled={!imageUrl}>
+              텍스트 추가
+            </button>
           </div>
         </div>
       </div>
